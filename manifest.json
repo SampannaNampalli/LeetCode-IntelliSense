@@ -1,0 +1,57 @@
+{
+  "manifest_version": 3,
+  "name": "LeetCode Java IntelliSense",
+  "version": "1.0.1",
+  "description": "Hover tooltips with Java method signatures and parameter info for LeetCode's code editor.",
+
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "lc-java-intellisense@extension",
+      "strict_min_version": "128.0"
+    }
+  },
+
+  "icons": {
+    "16":  "icons/icon16.png",
+    "48":  "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16":  "icons/icon16.png",
+      "48":  "icons/icon48.png",
+      "128": "icons/icon128.png"
+    },
+    "default_title": "LeetCode Java IntelliSense"
+  },
+
+  "permissions": ["storage"],
+
+  "content_scripts": [
+    {
+      "matches": ["https://leetcode.com/*"],
+      "js": ["early_hook.js"],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://leetcode.com/*"],
+      "js": ["bridge.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://leetcode.com/*"],
+      "js": [
+        "java-data/java_lang.js",
+        "java-data/java_util.js",
+        "java-data/java_io.js",
+        "java-data/index.js",
+        "injected.js"
+      ],
+      "world": "MAIN",
+      "run_at": "document_idle"
+    }
+  ]
+}

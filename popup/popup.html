@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LeetCode Java IntelliSense</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="popup-container">
+    <!-- Header -->
+    <div class="header">
+      <div class="logo">
+        <span class="logo-j">J</span><span class="logo-brackets">&lt;&gt;</span>
+      </div>
+      <div class="title-block">
+        <h1 class="title">Java IntelliSense</h1>
+        <p class="subtitle">for LeetCode</p>
+      </div>
+    </div>
+
+    <!-- Toggle Row -->
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <span class="toggle-label" id="toggle-label">Active</span>
+        <span class="toggle-desc" id="toggle-desc">Hover tooltips enabled on leetcode.com</span>
+      </div>
+      <label class="switch" for="toggle" aria-label="Enable or disable IntelliSense">
+        <input type="checkbox" id="toggle" checked />
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <!-- Coverage Info -->
+    <div class="coverage">
+      <p class="coverage-title">Coverage</p>
+      <div class="pkg-list">
+        <span class="pkg-tag">java.lang</span>
+        <span class="pkg-tag">java.util</span>
+        <span class="pkg-tag">java.io</span>
+      </div>
+      <p class="coverage-note">
+        Hover over class names and method calls in the Java editor for quick info.
+      </p>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+      <span>v1.0.0</span>
+      <span>·</span>
+      <span>Firefox 128+</span>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
