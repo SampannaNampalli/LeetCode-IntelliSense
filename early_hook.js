@@ -29,25 +29,52 @@
     if (!origCreate || origCreate.__lc_hooked__) return;
 
     monaco.editor.create = function (domElement, options, ...rest) {
-      // Force hover into the options BEFORE the editor is constructed.
+      // Force hover AND suggestions into the options BEFORE the editor is
+      // constructed.  LeetCode disables both to use its own custom IntelliSense
+      // overlay — we override that so our registered providers can fire.
       const patchedOptions = Object.assign({}, options, {
-        hover: { enabled: true, delay: 300 }
+        hover: { enabled: true, delay: 300 },
+        quickSuggestions:          { other: true, comments: false, strings: false },
+        suggestOnTriggerCharacters: true,
+        suggest: {
+          showMethods:         true,
+          showFields:          true,
+          showClasses:         false, // we don't provide class-level completions here
+          showKeywords:        false,
+          showSnippets:        false,
+          filterGraceful:      true,
+          localityBonus:       true,
+          shareSuggestSelections: false
+        }
       });
 
       const editor = origCreate.call(this, domElement, patchedOptions, ...rest);
 
-      // Also wrap the live editor's updateOptions so LeetCode can't turn hover
-      // off after the fact (LeetCode calls updateOptions with its own settings
-      // right after create() returns).
+      // Wrap the live editor's updateOptions so LeetCode can't turn hover or
+      // suggestions off after the fact.
       if (editor && typeof editor.updateOptions === "function") {
         const origUpdate = editor.updateOptions.bind(editor);
         editor.updateOptions = function (newOpts) {
-          // If the caller is trying to set hover, override it to stay enabled.
-          if (newOpts && (newOpts.hover === false ||
-              (typeof newOpts.hover === "object" && newOpts.hover?.enabled === false))) {
-            newOpts = Object.assign({}, newOpts, { hover: { enabled: true, delay: 300 } });
+          if (!newOpts) return origUpdate(newOpts);
+
+          let patched = newOpts;
+
+          // Prevent hover being disabled
+          if (patched.hover === false ||
+              (typeof patched.hover === "object" && patched.hover?.enabled === false)) {
+            patched = Object.assign({}, patched, { hover: { enabled: true, delay: 300 } });
           }
-          return origUpdate(newOpts);
+
+          // Prevent suggestions being disabled
+          if (patched.quickSuggestions === false ||
+              patched.suggestOnTriggerCharacters === false) {
+            patched = Object.assign({}, patched, {
+              quickSuggestions:           { other: true, comments: false, strings: false },
+              suggestOnTriggerCharacters: true
+            });
+          }
+
+          return origUpdate(patched);
         };
       }
 

@@ -1,7 +1,8 @@
 /**
  * injected.js — MAIN world, document_idle
  *
- * Registers a Java hover provider with Monaco.
+ * Registers a Java hover provider AND a dot-triggered completion provider
+ * with Monaco.
  *
  * How Monaco is found (priority order):
  *   1. __lc_intellisense_monaco_ready__ event from early_hook.js
@@ -20,6 +21,14 @@
  *   registerHoverProvider() is global per-language in Monaco, so we only
  *   need to call it once — but we must wait until Monaco is truly ready
  *   (i.e. at least one editor has been created) before it reliably works.
+ *
+ * Completion provider — how type inference works:
+ *   When the user types "someVar.", the provider reads the word before the dot
+ *   and resolves it in two ways:
+ *     1. Direct class name  → static members  (e.g. "Math."  → Math methods)
+ *     2. Variable name      → scan upward through the file for a declaration
+ *        matching patterns like "HashMap<K,V> varName", "varName = new ArrayList()",
+ *        or "for (String s : list)", then look up the resolved class in JAVA_API.
  */
 
 (function () {
@@ -35,11 +44,12 @@
   const LOG = (...a) => console.log("[LC Java IntelliSense]", ...a);
 
   // ─── State ──────────────────────────────────────────────────────────────────
-  let enabled         = true;
-  let monacoInstance  = null;   // set once Monaco is fully ready
-  let hoverDisposable = null;
-  let pollerTimer     = null;
-  let pollerElapsed   = 0;
+  let enabled              = true;
+  let monacoInstance       = null;   // set once Monaco is fully ready
+  let hoverDisposable      = null;   // IDisposable for the hover provider
+  let completionDisposable = null;   // IDisposable for the completion provider
+  let pollerTimer          = null;
+  let pollerElapsed        = 0;
 
   // ─── Bridge: toggle relay from bridge.js (ISOLATED world) ──────────────────
   window.addEventListener("message", (event) => {
@@ -47,11 +57,12 @@
     enabled = !!event.data.enabled;
     LOG("Toggle:", enabled ? "ON" : "OFF");
     if (!monacoInstance) return;
-    if (!enabled && hoverDisposable) {
-      hoverDisposable.dispose();
-      hoverDisposable = null;
-    } else if (enabled && !hoverDisposable) {
-      registerProvider();
+    if (!enabled) {
+      hoverDisposable?.dispose();      hoverDisposable = null;
+      completionDisposable?.dispose(); completionDisposable = null;
+    } else {
+      if (!hoverDisposable)      registerProvider();
+      if (!completionDisposable) registerCompletionProvider();
     }
   });
 
@@ -116,12 +127,19 @@
     const existingEditors = monaco.editor?.getEditors?.() || [];
     for (const ed of existingEditors) {
       if (typeof ed.updateOptions === "function") {
-        ed.updateOptions({ hover: { enabled: true, delay: 300 } });
-        LOG("Forced hover: enabled on existing editor (lang: " + ed.getModel?.()?.getLanguageId?.() + ")");
+        ed.updateOptions({
+          hover:                      { enabled: true, delay: 300 },
+          quickSuggestions:           { other: true, comments: false, strings: false },
+          suggestOnTriggerCharacters: true
+        });
+        LOG("Forced hover+suggestions: enabled on existing editor (lang: " + ed.getModel?.()?.getLanguageId?.() + ")");
       }
     }
 
-    if (enabled) registerProvider();
+    if (enabled) {
+      registerProvider();
+      registerCompletionProvider();
+    }
   }
 
   // ─── tryActivate() — called by poller and events ───────────────────────────
@@ -157,15 +175,19 @@
     // registered provider can actually fire.
     const editor = e.detail;
     if (editor && typeof editor.updateOptions === "function") {
-      editor.updateOptions({ hover: { enabled: true, delay: 300 } });
-      LOG("Forced hover: enabled on new editor instance.");
+      editor.updateOptions({
+        hover:                      { enabled: true, delay: 300 },
+        quickSuggestions:           { other: true, comments: false, strings: false },
+        suggestOnTriggerCharacters: true
+      });
+      LOG("Forced hover+suggestions: enabled on new editor instance.");
     }
 
     if (monacoInstance) {
-      // A new editor was created after SPA navigation — re-register.
-      if (enabled && !hoverDisposable) {
-        LOG("Re-registering provider after editor re-creation.");
-        registerProvider();
+      // A new editor was created after SPA navigation — re-register both.
+      if (enabled) {
+        if (!hoverDisposable)      { LOG("Re-registering hover after editor re-creation.");      registerProvider(); }
+        if (!completionDisposable) { LOG("Re-registering completion after editor re-creation."); registerCompletionProvider(); }
       }
       return;
     }
@@ -208,9 +230,9 @@
 
     if (!monacoInstance) {
       startPoller();
-    } else if (enabled && !hoverDisposable) {
-      LOG("Editor DOM appeared; re-registering provider.");
-      registerProvider();
+    } else if (enabled) {
+      if (!hoverDisposable)      { LOG("Editor DOM appeared; re-registering hover.");      registerProvider(); }
+      if (!completionDisposable) { LOG("Editor DOM appeared; re-registering completion."); registerCompletionProvider(); }
     }
   });
   editorObserver.observe(document.documentElement, { childList: true, subtree: true });
@@ -256,10 +278,11 @@
   window.__lcji_debug = function () {
     const m = getMonaco();
     console.group("[LC Java IntelliSense] Diagnostic");
-    console.log("enabled:",          enabled);
-    console.log("monacoInstance:",   monacoInstance ? "✅ found" : "❌ not found");
-    console.log("hoverDisposable:",  hoverDisposable ? "✅ registered" : "❌ not registered");
-    console.log("JAVA_API:",         window.JAVA_API
+    console.log("enabled:",               enabled);
+    console.log("monacoInstance:",        monacoInstance ? "✅ found" : "❌ not found");
+    console.log("hoverDisposable:",       hoverDisposable ? "✅ registered" : "❌ not registered");
+    console.log("completionDisposable:",  completionDisposable ? "✅ registered" : "❌ not registered");
+    console.log("JAVA_API:",              window.JAVA_API
       ? "✅ loaded (" + Object.keys(window.JAVA_API).length + " classes)"
       : "❌ missing");
     console.log("window.monaco:",    window.monaco ? "✅ present" : "❌ absent");
@@ -294,9 +317,9 @@
     const m = getMonaco();
     if (!m) { console.error("[LC Java IntelliSense] Monaco not found on window.monaco."); return; }
     LOG("Force-activating...");
-    monacoInstance = null; // reset so onMonacoReady runs again
-    hoverDisposable?.dispose();
-    hoverDisposable = null;
+    monacoInstance = null;
+    hoverDisposable?.dispose();      hoverDisposable = null;
+    completionDisposable?.dispose(); completionDisposable = null;
     onMonacoReady(m);
   };
 
@@ -436,6 +459,181 @@
     if (matches.length <= 1) return matches;
     const preferred = matches.filter(m => lineText.includes(m.className));
     return preferred.length > 0 ? preferred : matches;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ─── Completion provider (dot-triggered) ────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * registerCompletionProvider()
+   * Registers a Monaco completion provider that fires when the user types '.'
+   * after a class name or variable name, returning method + field suggestions.
+   */
+  function registerCompletionProvider() {
+    if (!monacoInstance) { LOG("registerCompletionProvider: monacoInstance is null — skipping."); return; }
+    if (completionDisposable) { completionDisposable.dispose(); completionDisposable = null; }
+
+    const CompletionItemKind = monacoInstance.languages.CompletionItemKind;
+    const InsertTextRule     = monacoInstance.languages.CompletionItemInsertTextRule;
+
+    completionDisposable = monacoInstance.languages.registerCompletionItemProvider(LANG_ID, {
+      triggerCharacters: ["."],
+
+      provideCompletionItems(model, position) {
+        if (!enabled) return null;
+        try {
+          const lineText        = model.getLineContent(position.lineNumber);
+          const textBeforeCursor = lineText.substring(0, position.column - 1);
+
+          // We need exactly: <word>.<cursor>
+          // (possibly with whitespace, but practically always adjacent)
+          const dotMatch = textBeforeCursor.match(/(\w+)\s*\.\s*$/);
+          if (!dotMatch) return null;
+
+          const objectName = dotMatch[1];
+          LOG("Completion triggered after:", objectName);
+
+          const className = resolveType(objectName, model, position);
+          if (!className) { LOG("Could not resolve type of:", objectName); return { suggestions: [] }; }
+
+          const entry = window.JAVA_API?.[className];
+          if (!entry)    { LOG("No JAVA_API entry for:", className);         return { suggestions: [] }; }
+
+          LOG("Completion: resolved", objectName, "→", className);
+
+          // Range = the partial word the user may already have typed after the dot
+          const partialWord = model.getWordAtPosition(position);
+          const range = partialWord
+            ? { startLineNumber: position.lineNumber, endLineNumber: position.lineNumber,
+                startColumn: partialWord.startColumn, endColumn: partialWord.endColumn }
+            : { startLineNumber: position.lineNumber, endLineNumber: position.lineNumber,
+                startColumn: position.column, endColumn: position.column };
+
+          const suggestions = [];
+
+          // ── Methods ──────────────────────────────────────────────────────
+          for (const [methodName, overloads] of Object.entries(entry.methods || {})) {
+            const ov       = overloads[0]; // primary overload for label/signature
+            const hasParams = (ov.params?.length ?? 0) > 0;
+            const paramStr  = (ov.params || []).map(p => p.type + " " + p.name).join(", ");
+            const retStr    = ov.returns || "void";
+
+            suggestions.push({
+              label:            { label: methodName + "()", detail: " " + retStr, description: entry.package },
+              kind:             CompletionItemKind.Method,
+              detail:           retStr + " " + methodName + "(" + paramStr + ")",
+              documentation:    buildCompletionDoc(methodName, overloads),
+              insertText:       hasParams ? methodName + "($0)" : methodName + "()",
+              insertTextRules:  hasParams ? InsertTextRule.InsertAsSnippet : 0,
+              range,
+              sortText:         "0_" + methodName,   // methods first
+              filterText:       methodName
+            });
+          }
+
+          // ── Fields / constants ────────────────────────────────────────────
+          for (const [fieldName, field] of Object.entries(entry.fields || {})) {
+            suggestions.push({
+              label:         { label: fieldName, detail: " " + field.type, description: entry.package },
+              kind:          CompletionItemKind.Field,
+              detail:        field.type + " " + fieldName,
+              documentation: { value: field.desc, isTrusted: true },
+              insertText:    fieldName,
+              range,
+              sortText:      "1_" + fieldName,       // fields after methods
+              filterText:    fieldName
+            });
+          }
+
+          return { suggestions, incomplete: false };
+        } catch (err) {
+          LOG("Error in provideCompletionItems:", err);
+          return null;
+        }
+      }
+    });
+
+    LOG("Completion provider registered for '" + LANG_ID + "'. Type 'ClassName.' or 'varName.' to test.");
+  }
+
+  /**
+   * buildCompletionDoc(methodName, overloads)
+   * Builds a Markdown documentation string for the completion item tooltip.
+   * Shows all overloads so the user knows the full API.
+   */
+  function buildCompletionDoc(methodName, overloads) {
+    let value = "";
+    for (let i = 0; i < overloads.length; i++) {
+      const ov  = overloads[i];
+      if (i > 0) value += "\n---\n";
+      const ret  = ov.returns ? ov.returns + " " : "void ";
+      value += codeBlock("java", ret + ov.signature) + "\n";
+      if (ov.desc) value += ov.desc + "\n\n";
+      if (ov.params?.length > 0) {
+        for (const p of ov.params) value += `- \`${p.type}\` **${p.name}** — ${p.desc}\n`;
+        value += "\n";
+      }
+      if (ov.returnsDesc) value += `↩ *Returns:* ${ov.returnsDesc}\n\n`;
+      if (ov.throws?.length > 0) {
+        for (const t of ov.throws) value += `⚠ *Throws:* \`${t}\`\n`;
+      }
+    }
+    return { value, isTrusted: true };
+  }
+
+  /**
+   * resolveType(objectName, model, position)
+   * Returns the Java class name for the given identifier, or null.
+   *
+   * Resolution order:
+   *   1. Direct class name match      → for static access  (Math, Integer, Arrays…)
+   *   2. Declaration scan (upward)    → TypeName<G>  varName
+   *   3. Constructor assignment scan  → varName = new TypeName()
+   *   4. For-each loop variable scan  → for (TypeName varName : collection)
+   */
+  function resolveType(objectName, model, position) {
+    const api = window.JAVA_API;
+    if (!api) return null;
+
+    // 1. Direct class name (e.g. Math, Integer, Collections)
+    if (api[objectName]) return objectName;
+
+    const currentLine = position.lineNumber;
+
+    for (let i = currentLine; i >= 1; i--) {
+      const line = model.getLineContent(i);
+
+      // 2. Declaration: TypeName<...>[]* varName
+      //    e.g. "HashMap<Integer, String> map = ..."
+      //         "ArrayList<Integer> list;"
+      //         "int[] arr" — ignored (primitives not in JAVA_API)
+      const declRe = new RegExp(
+        `(?:^|[\\s;{(])([A-Z]\\w*)(?:<[^>]*>)?(?:\\[\\])*\\s+${rxEscape(objectName)}(?:\\s*[=;,)])`,
+        "m"
+      );
+      const declMatch = line.match(declRe);
+      if (declMatch && api[declMatch[1]]) return declMatch[1];
+
+      // 3. Constructor assignment: varName = new TypeName(...)
+      //    e.g. "map = new HashMap<>()"  or  "list = new ArrayList<>();"
+      const newRe = new RegExp(`\\b${rxEscape(objectName)}\\s*=\\s*new\\s+([A-Z]\\w*)`);
+      const newMatch = line.match(newRe);
+      if (newMatch && api[newMatch[1]]) return newMatch[1];
+
+      // 4. For-each loop variable: for (TypeName varName : ...)
+      //    e.g. "for (String s : list)"
+      const forRe = new RegExp(`for\\s*\\(\\s*([A-Z]\\w*)(?:<[^>]*>)?(?:\\[\\])*\\s+${rxEscape(objectName)}\\s*:`);
+      const forMatch = line.match(forRe);
+      if (forMatch && api[forMatch[1]]) return forMatch[1];
+    }
+
+    return null;
+  }
+
+  /** Escapes a string for use inside a RegExp character class or pattern. */
+  function rxEscape(s) {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 
 })();
