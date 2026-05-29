@@ -48,6 +48,7 @@
   let monacoInstance       = null;   // set once Monaco is fully ready
   let hoverDisposable      = null;   // IDisposable for the hover provider
   let completionDisposable = null;   // IDisposable for the completion provider
+  let signatureDisposable  = null;   // IDisposable for the signature help provider
   let pollerTimer          = null;
   let pollerElapsed        = 0;
 
@@ -60,9 +61,11 @@
     if (!enabled) {
       hoverDisposable?.dispose();      hoverDisposable = null;
       completionDisposable?.dispose(); completionDisposable = null;
+      signatureDisposable?.dispose();  signatureDisposable = null;
     } else {
       if (!hoverDisposable)      registerProvider();
       if (!completionDisposable) registerCompletionProvider();
+      if (!signatureDisposable)  registerSignatureHelpProvider();
     }
   });
 
@@ -130,15 +133,17 @@
         ed.updateOptions({
           hover:                      { enabled: true, delay: 300 },
           quickSuggestions:           { other: true, comments: false, strings: false },
-          suggestOnTriggerCharacters: true
+          suggestOnTriggerCharacters: true,
+          parameterHints:             { enabled: true, cycle: false }
         });
-        LOG("Forced hover+suggestions: enabled on existing editor (lang: " + ed.getModel?.()?.getLanguageId?.() + ")");
+        LOG("Forced hover+suggestions+sigHelp: enabled on existing editor (lang: " + ed.getModel?.()?.getLanguageId?.() + ")");
       }
     }
 
     if (enabled) {
       registerProvider();
       registerCompletionProvider();
+      registerSignatureHelpProvider();
     }
   }
 
@@ -178,16 +183,18 @@
       editor.updateOptions({
         hover:                      { enabled: true, delay: 300 },
         quickSuggestions:           { other: true, comments: false, strings: false },
-        suggestOnTriggerCharacters: true
+        suggestOnTriggerCharacters: true,
+        parameterHints:             { enabled: true, cycle: false }
       });
-      LOG("Forced hover+suggestions: enabled on new editor instance.");
+      LOG("Forced hover+suggestions+sigHelp: enabled on new editor instance.");
     }
 
     if (monacoInstance) {
-      // A new editor was created after SPA navigation — re-register both.
+      // A new editor was created after SPA navigation — re-register all three.
       if (enabled) {
-        if (!hoverDisposable)      { LOG("Re-registering hover after editor re-creation.");      registerProvider(); }
-        if (!completionDisposable) { LOG("Re-registering completion after editor re-creation."); registerCompletionProvider(); }
+        if (!hoverDisposable)      { LOG("Re-registering hover after editor re-creation.");           registerProvider(); }
+        if (!completionDisposable) { LOG("Re-registering completion after editor re-creation.");      registerCompletionProvider(); }
+        if (!signatureDisposable)  { LOG("Re-registering signature help after editor re-creation."); registerSignatureHelpProvider(); }
       }
       return;
     }
@@ -231,8 +238,9 @@
     if (!monacoInstance) {
       startPoller();
     } else if (enabled) {
-      if (!hoverDisposable)      { LOG("Editor DOM appeared; re-registering hover.");      registerProvider(); }
-      if (!completionDisposable) { LOG("Editor DOM appeared; re-registering completion."); registerCompletionProvider(); }
+      if (!hoverDisposable)      { LOG("Editor DOM appeared; re-registering hover.");           registerProvider(); }
+      if (!completionDisposable) { LOG("Editor DOM appeared; re-registering completion.");      registerCompletionProvider(); }
+      if (!signatureDisposable)  { LOG("Editor DOM appeared; re-registering signature help.");  registerSignatureHelpProvider(); }
     }
   });
   editorObserver.observe(document.documentElement, { childList: true, subtree: true });
@@ -282,6 +290,7 @@
     console.log("monacoInstance:",        monacoInstance ? "✅ found" : "❌ not found");
     console.log("hoverDisposable:",       hoverDisposable ? "✅ registered" : "❌ not registered");
     console.log("completionDisposable:",  completionDisposable ? "✅ registered" : "❌ not registered");
+    console.log("signatureDisposable:",   signatureDisposable ? "✅ registered" : "❌ not registered");
     console.log("JAVA_API:",              window.JAVA_API
       ? "✅ loaded (" + Object.keys(window.JAVA_API).length + " classes)"
       : "❌ missing");
@@ -320,6 +329,7 @@
     monacoInstance = null;
     hoverDisposable?.dispose();      hoverDisposable = null;
     completionDisposable?.dispose(); completionDisposable = null;
+    signatureDisposable?.dispose();  signatureDisposable = null;
     onMonacoReady(m);
   };
 
@@ -634,6 +644,191 @@
   /** Escapes a string for use inside a RegExp character class or pattern. */
   function rxEscape(s) {
     return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ─── Signature Help Provider (( and , triggered) ─────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * registerSignatureHelpProvider()
+   *
+   * Shows a parameter-hints tooltip when the cursor is inside a method call's
+   * parentheses, e.g.:
+   *
+   *   list.add(|)            →  add(int index, E element)
+   *   sb.insert(3, |)        →  insert(int offset, String str)  [param 1 highlighted]
+   *   Integer.parseInt(s, |) →  parseInt(String s, int radix)   [param 1 highlighted]
+   */
+  function registerSignatureHelpProvider() {
+    if (!monacoInstance) { LOG("registerSignatureHelpProvider: monacoInstance is null — skipping."); return; }
+    if (signatureDisposable) { signatureDisposable.dispose(); signatureDisposable = null; }
+
+    signatureDisposable = monacoInstance.languages.registerSignatureHelpProvider(LANG_ID, {
+      signatureHelpTriggerCharacters:   ["(", ","],
+      signatureHelpRetriggerCharacters: [","],
+
+      provideSignatureHelp(model, position /*, token, context */) {
+        if (!enabled) return null;
+        try {
+          const sigCtx = findSignatureContext(model, position);
+          if (!sigCtx) return null;
+
+          const { methodName, objectName, activeParam } = sigCtx;
+          LOG("SignatureHelp → method:", methodName, "  object:", objectName ?? "(none)",
+              "  param index:", activeParam);
+
+          const api = window.JAVA_API;
+          if (!api) return null;
+
+          // Resolve which class owns the method
+          let overloads    = null;
+          let resolvedClass = null;
+
+          if (objectName) {
+            const cls = resolveType(objectName, model, position);
+            if (cls && api[cls]?.methods?.[methodName]) {
+              overloads     = api[cls].methods[methodName];
+              resolvedClass = cls;
+            }
+          }
+
+          // Fall back: search all classes (handles bare method calls like parseInt)
+          if (!overloads) {
+            for (const [cls, entry] of Object.entries(api)) {
+              if (entry.methods?.[methodName]) {
+                overloads     = entry.methods[methodName];
+                resolvedClass = cls;
+                break;
+              }
+            }
+          }
+
+          if (!overloads) return null;
+          LOG("SignatureHelp: resolved", methodName, "→", resolvedClass);
+
+          // Build Monaco SignatureInformation for each overload
+          const signatures = overloads.map(ov => {
+            const params  = ov.params || [];
+            const retPart = ov.returns ? ov.returns + " " : "";
+
+            // Rebuild the label precisely so we can compute exact param offsets:
+            // e.g.  "boolean add(E e)"  or  "void add(int index, E element)"
+            const methodPart   = ov.signature.substring(0, ov.signature.indexOf("("));
+            const paramStrings = params.map(p => p.type + " " + p.name);
+            const innerLabel   = paramStrings.join(", ");
+            const fullLabel    = retPart + methodPart + "(" + innerLabel + ")";
+
+            // Compute character offsets for each param inside fullLabel
+            const openParenPos = (retPart + methodPart + "(").length;
+            const parameters   = [];
+            let   cursor       = openParenPos;
+            for (let pi = 0; pi < paramStrings.length; pi++) {
+              const ps = paramStrings[pi];
+              parameters.push({
+                label: [cursor, cursor + ps.length],
+                documentation: {
+                  value: "`" + params[pi].type + "` **" + params[pi].name + "** — " + params[pi].desc,
+                  isTrusted: true
+                }
+              });
+              cursor += ps.length + 2; // +2 for ", "
+            }
+
+            // Build description: method desc + returns
+            let docValue = ov.desc || "";
+            if (ov.returnsDesc) docValue += "\n\n↩ *Returns:* " + ov.returnsDesc;
+            if (ov.throws?.length > 0) {
+              docValue += "\n\n";
+              for (const t of ov.throws) docValue += "⚠ *Throws:* `" + t + "`\n";
+            }
+
+            return {
+              label: fullLabel,
+              documentation: docValue ? { value: docValue, isTrusted: true } : undefined,
+              parameters
+            };
+          });
+
+          // Pick the best activeSignature: prefer the overload whose param count
+          // covers the current argument position.
+          let activeSignature = 0;
+          for (let si = 0; si < overloads.length; si++) {
+            if ((overloads[si].params?.length ?? 0) >= activeParam + 1) {
+              activeSignature = si;
+              break;
+            }
+          }
+          const clampedParam = Math.min(
+            activeParam,
+            Math.max(0, (overloads[activeSignature].params?.length ?? 1) - 1)
+          );
+
+          return {
+            value: { signatures, activeSignature, activeParameter: clampedParam },
+            dispose() {}
+          };
+        } catch (err) {
+          LOG("Error in provideSignatureHelp:", err);
+          return null;
+        }
+      }
+    });
+
+    LOG("Signature help provider registered for '" + LANG_ID + "'. Type a method call to test.");
+  }
+
+  /**
+   * findSignatureContext(model, position)
+   *
+   * Scans backward from the cursor (across up to 10 lines) to find the innermost
+   * unclosed '(' and derives:
+   *   - methodName  : the identifier immediately before that '('
+   *   - objectName  : the identifier before 'methodName.' (null if none)
+   *   - activeParam : how many commas at depth 0 are between '(' and cursor
+   *
+   * Returns null if the cursor is not inside any method call.
+   */
+  function findSignatureContext(model, position) {
+    // Collect text from up to 10 lines back to current cursor
+    const MAX_LINES_BACK = 10;
+    const fromLine = Math.max(1, position.lineNumber - MAX_LINES_BACK);
+    const lines    = [];
+    for (let i = fromLine; i <= position.lineNumber; i++) {
+      const raw = model.getLineContent(i);
+      lines.push(i === position.lineNumber ? raw.substring(0, position.column - 1) : raw);
+    }
+    const text = lines.join("\n");
+
+    let depth       = 0;
+    let activeParam = 0;
+    let openIdx     = -1;
+
+    // Walk backward; track paren depth and count commas at depth 0
+    for (let i = text.length - 1; i >= 0; i--) {
+      const ch = text[i];
+      if      (ch === ")") { depth++; }
+      else if (ch === "(") {
+        if (depth === 0) { openIdx = i; break; }
+        depth--;
+      }
+      else if (ch === "," && depth === 0) { activeParam++; }
+    }
+
+    if (openIdx < 0) return null;   // not inside any method call
+
+    // Extract method name: word chars immediately before '('
+    const beforeParen  = text.substring(0, openIdx);
+    const methodMatch  = beforeParen.match(/(\w+)\s*$/);
+    if (!methodMatch) return null;
+    const methodName   = methodMatch[1];
+
+    // Extract object name: word before '.' before the method name
+    const beforeMethod = beforeParen.substring(0, beforeParen.length - methodMatch[0].length);
+    const dotMatch     = beforeMethod.match(/(\w+)\s*\.\s*$/);
+    const objectName   = dotMatch ? dotMatch[1] : null;
+
+    return { methodName, objectName, activeParam };
   }
 
 })();

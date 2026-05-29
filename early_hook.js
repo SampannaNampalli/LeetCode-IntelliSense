@@ -36,6 +36,7 @@
         hover: { enabled: true, delay: 300 },
         quickSuggestions:          { other: true, comments: false, strings: false },
         suggestOnTriggerCharacters: true,
+        parameterHints:            { enabled: true, cycle: false },
         suggest: {
           showMethods:         true,
           showFields:          true,
@@ -72,6 +73,12 @@
               quickSuggestions:           { other: true, comments: false, strings: false },
               suggestOnTriggerCharacters: true
             });
+          }
+
+          // Prevent parameter hints being disabled
+          if (patched.parameterHints === false ||
+              (typeof patched.parameterHints === "object" && patched.parameterHints?.enabled === false)) {
+            patched = Object.assign({}, patched, { parameterHints: { enabled: true, cycle: false } });
           }
 
           return origUpdate(patched);
