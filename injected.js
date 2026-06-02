@@ -38,10 +38,20 @@
   const BRIDGE_SOURCE   = "lc-intellisense-bridge";
   const MONACO_EVENT    = "__lc_intellisense_monaco_ready__";
   const EDITOR_EVENT    = "__lc_intellisense_editor_created__";
-  const LANG_ID         = "java";
+  const SUPPORTED_LANGS = ["java", "cpp", "c++"]; // register for both C++ variants LeetCode might use
   const POLL_INTERVAL   = 200;   // ms
   const POLL_MAX        = 90_000; // ms
-  const LOG = (...a) => console.log("[LC Java IntelliSense]", ...a);
+  const LOG = (...a) => console.log("[LC IntelliSense]", ...a);
+
+  /** Returns the API object for the given Monaco language ID, or null. */
+  function getApiForLang(langId) {
+    if (!langId) return null;
+    if (langId === "java") return window.JAVA_API || null;
+    // Accept any C++-ish language ID: "cpp", "c++", "c_cpp", "cplusplus", etc.
+    if (langId === "cpp" || langId.includes("c++") || langId.includes("cpp"))
+      return window.CPP_API || null;
+    return null;
+  }
 
   // ─── State ──────────────────────────────────────────────────────────────────
   let enabled              = true;
@@ -122,7 +132,7 @@
 
     monacoInstance = monaco;
     stopPoller();
-    LOG("Monaco confirmed ready. Registering hover provider for '" + LANG_ID + "'...");
+    LOG("Monaco confirmed ready. Registering providers for:", SUPPORTED_LANGS.join(", "), "...");
 
     // Force-enable hover on any editors that already exist at activation time.
     // This covers the case where editor.create() fired before early_hook's hook
@@ -248,38 +258,41 @@
   // ─── registerProvider() ────────────────────────────────────────────────────
   function registerProvider() {
     if (!monacoInstance) { LOG("registerProvider: monacoInstance is null — skipping."); return; }
-
-    // Dispose stale registration, if any.
     if (hoverDisposable) { hoverDisposable.dispose(); hoverDisposable = null; }
 
-    hoverDisposable = monacoInstance.languages.registerHoverProvider(LANG_ID, {
-      provideHover(model, position) {
-        if (!enabled) return null;
-        try {
-          const wordInfo = model.getWordAtPosition(position);
-          if (!wordInfo) return null;
-
-          const token    = wordInfo.word;
-          const lineText = model.getLineContent(position.lineNumber);
-          const range    = {
-            startLineNumber: position.lineNumber,
-            startColumn:     wordInfo.startColumn,
-            endLineNumber:   position.lineNumber,
-            endColumn:       wordInfo.endColumn
-          };
-
-          LOG("provideHover → token:", token);
-          const result = buildHover(token, lineText, range);
-          if (!result) LOG("No match for token:", token);
-          return result;
-        } catch (err) {
-          LOG("Error in provideHover:", err);
-          return null;
+    // Register one HoverProvider per supported language and wrap them so the
+    // rest of the code can call hoverDisposable.dispose() as before.
+    const disposables = SUPPORTED_LANGS.map(langId =>
+      monacoInstance.languages.registerHoverProvider(langId, {
+        provideHover(model, position) {
+          if (!enabled) return null;
+          try {
+            const modelLang = model.getLanguageId?.() || "";
+            // Guard: only handle the language this provider was registered for.
+            // This prevents the Java provider from showing results on a C++ model
+            // when Monaco calls multiple providers.
+            const api = getApiForLang(modelLang);
+            if (!api) return null;
+            if (langId === "java" && modelLang !== "java") return null;
+            if (langId !== "java" && modelLang === "java") return null;
+            const wordInfo = model.getWordAtPosition(position);
+            if (!wordInfo) return null;
+            const token    = wordInfo.word;
+            const lineText = model.getLineContent(position.lineNumber);
+            const range    = {
+              startLineNumber: position.lineNumber, startColumn: wordInfo.startColumn,
+              endLineNumber:   position.lineNumber, endColumn:   wordInfo.endColumn
+            };
+            LOG("provideHover [" + langId + "/" + modelLang + "] → token:", token);
+            const result = buildHover(token, lineText, range, api);
+            if (!result) LOG("No match for token:", token);
+            return result;
+          } catch (err) { LOG("Error in provideHover:", err); return null; }
         }
-      }
-    });
-
-    LOG("Hover provider registered for '" + LANG_ID + "'. Hover over Java identifiers to test.");
+      })
+    );
+    hoverDisposable = { dispose() { disposables.forEach(d => d.dispose()); } };
+    LOG("Hover providers registered for:", SUPPORTED_LANGS.join(", "));
   }
 
   // ─── Diagnostic helper ─────────────────────────────────────────────────────
@@ -291,8 +304,11 @@
     console.log("hoverDisposable:",       hoverDisposable ? "✅ registered" : "❌ not registered");
     console.log("completionDisposable:",  completionDisposable ? "✅ registered" : "❌ not registered");
     console.log("signatureDisposable:",   signatureDisposable ? "✅ registered" : "❌ not registered");
-    console.log("JAVA_API:",              window.JAVA_API
+    console.log("JAVA_API:", window.JAVA_API
       ? "✅ loaded (" + Object.keys(window.JAVA_API).length + " classes)"
+      : "❌ missing");
+    console.log("CPP_API:",  window.CPP_API
+      ? "✅ loaded (" + Object.keys(window.CPP_API).length + " classes)"
       : "❌ missing");
     console.log("window.monaco:",    window.monaco ? "✅ present" : "❌ absent");
     console.log("window.require:",   typeof window.require === "function" ? "✅ present" : "❌ absent");
@@ -311,12 +327,32 @@
 
     if (!monacoInstance) {
       console.warn(
-        "Hover provider not yet active. Possible causes:\n" +
+        "Providers not yet active. Possible causes:\n" +
         "  • LeetCode hasn't created the code editor yet (navigate to a problem).\n" +
         "  • early_hook.js failed to intercept monaco.editor.create().\n" +
         "  • The extension was reloaded after Monaco was already set (reload the page).\n" +
         "Try: window.__lcji_forceActivate() to manually trigger activation."
       );
+    }
+    console.groupEnd();
+  };
+
+  // C++-specific diagnostic — run this while on a C++ LeetCode problem
+  window.__lcji_cppDebug = function () {
+    const m = getMonaco();
+    console.group("[LC IntelliSense] C++ Diagnostic");
+    console.log("CPP_STL_DATA_A:", window.CPP_STL_DATA_A ? "✅ (" + Object.keys(window.CPP_STL_DATA_A).length + " types)" : "❌ missing");
+    console.log("CPP_STL_DATA_B:", window.CPP_STL_DATA_B ? "✅ (" + Object.keys(window.CPP_STL_DATA_B).length + " types)" : "❌ missing");
+    console.log("CPP_ALGO_DATA:",  window.CPP_ALGO_DATA  ? "✅ (" + Object.keys(window.CPP_ALGO_DATA).length  + " types)" : "❌ missing");
+    console.log("CPP_API:",        window.CPP_API        ? "✅ (" + Object.keys(window.CPP_API).length        + " total)"  : "❌ missing");
+    if (window.CPP_API) console.log("CPP_API keys:", Object.keys(window.CPP_API).join(", "));
+    if (m) {
+      const editors = m.editor?.getEditors?.() || [];
+      editors.forEach((ed, i) => {
+        const lang = ed.getModel?.()?.getLanguageId?.();
+        const api  = getApiForLang(lang || "");
+        console.log("Editor", i, "langId:", lang, "→ api:", api ? "✅ found (" + Object.keys(api).length + " classes)" : "❌ no match");
+      });
     }
     console.groupEnd();
   };
@@ -345,28 +381,30 @@
   }
 
   // ─── Hover content builder ──────────────────────────────────────────────────
-  function buildHover(token, lineText, range) {
-    const api = window.JAVA_API;
-    if (!api) {
-      LOG("JAVA_API not found — data files may not have loaded.");
-      return null;
-    }
+  // api is passed in from provideHover (JAVA_API or CPP_API).
+  // langHint is used for syntax-highlighted code blocks.
+  function buildHover(token, lineText, range, api) {
+    if (!api) { LOG("API not loaded."); return null; }
+
+    // Determine syntax highlight language for code blocks.
+    const langHint = api === window.JAVA_API ? "java" : "cpp";
 
     // 1. Direct class / interface / enum match
     if (api[token]) {
-      return { range, contents: buildClassContents(token, api[token]) };
+      return { range, contents: buildClassContents(token, api[token], langHint) };
     }
 
     // 2. Method / field name match across all classes
     const matches = findTokenMatches(token, api);
     if (matches.length === 0) return null;
 
-    return { range, contents: buildMethodContents(token, matches, lineText) };
+    return { range, contents: buildMethodContents(token, matches, lineText, langHint) };
   }
 
   // ─── Class tooltip ──────────────────────────────────────────────────────────
-  function buildClassContents(className, entry) {
-    const kindIcon = entry.kind === "interface" ? "⬡" : "🔷";
+  function buildClassContents(className, entry, langHint) {
+    langHint = langHint || "java";
+    const kindIcon = entry.kind === "interface" ? "⧁" : "🔷";
     let value = "";
     value += `### ${kindIcon} \`${className}\`\n`;
     value += `*${entry.package}*\n\n`;
@@ -377,7 +415,7 @@
       value += `**Constructors**\n\n`;
       for (const ctor of entry.constructors) {
         const sig = `${className}${ctor.signature.slice(ctor.signature.indexOf("("))}`;
-        value += codeBlock("java", sig) + "\n";
+        value += codeBlock(langHint, sig) + "\n";
         if (ctor.desc)   value += `${ctor.desc}\n\n`;
         if (ctor.throws) value += `⚠ *Throws:* ${ctor.throws}\n\n`;
       }
@@ -386,7 +424,7 @@
     if (entry.fields && Object.keys(entry.fields).length > 0) {
       value += `**Fields / Constants**\n\n`;
       for (const [fieldName, field] of Object.entries(entry.fields)) {
-        value += codeBlock("java", `${field.type} ${fieldName}`) + "\n";
+        value += codeBlock(langHint, `${field.type} ${fieldName}`) + "\n";
         value += `${field.desc}\n\n`;
       }
     }
@@ -487,84 +525,64 @@
     const CompletionItemKind = monacoInstance.languages.CompletionItemKind;
     const InsertTextRule     = monacoInstance.languages.CompletionItemInsertTextRule;
 
-    completionDisposable = monacoInstance.languages.registerCompletionItemProvider(LANG_ID, {
-      triggerCharacters: ["."],
-
-      provideCompletionItems(model, position) {
-        if (!enabled) return null;
-        try {
-          const lineText        = model.getLineContent(position.lineNumber);
-          const textBeforeCursor = lineText.substring(0, position.column - 1);
-
-          // We need exactly: <word>.<cursor>
-          // (possibly with whitespace, but practically always adjacent)
-          const dotMatch = textBeforeCursor.match(/(\w+)\s*\.\s*$/);
-          if (!dotMatch) return null;
-
-          const objectName = dotMatch[1];
-          LOG("Completion triggered after:", objectName);
-
-          const className = resolveType(objectName, model, position);
-          if (!className) { LOG("Could not resolve type of:", objectName); return { suggestions: [] }; }
-
-          const entry = window.JAVA_API?.[className];
-          if (!entry)    { LOG("No JAVA_API entry for:", className);         return { suggestions: [] }; }
-
-          LOG("Completion: resolved", objectName, "→", className);
-
-          // Range = the partial word the user may already have typed after the dot
-          const partialWord = model.getWordAtPosition(position);
-          const range = partialWord
-            ? { startLineNumber: position.lineNumber, endLineNumber: position.lineNumber,
-                startColumn: partialWord.startColumn, endColumn: partialWord.endColumn }
-            : { startLineNumber: position.lineNumber, endLineNumber: position.lineNumber,
-                startColumn: position.column, endColumn: position.column };
-
-          const suggestions = [];
-
-          // ── Methods ──────────────────────────────────────────────────────
-          for (const [methodName, overloads] of Object.entries(entry.methods || {})) {
-            const ov       = overloads[0]; // primary overload for label/signature
-            const hasParams = (ov.params?.length ?? 0) > 0;
-            const paramStr  = (ov.params || []).map(p => p.type + " " + p.name).join(", ");
-            const retStr    = ov.returns || "void";
-
-            suggestions.push({
-              label:            { label: methodName + "()", detail: " " + retStr, description: entry.package },
-              kind:             CompletionItemKind.Method,
-              detail:           retStr + " " + methodName + "(" + paramStr + ")",
-              documentation:    buildCompletionDoc(methodName, overloads),
-              insertText:       hasParams ? methodName + "($0)" : methodName + "()",
-              insertTextRules:  hasParams ? InsertTextRule.InsertAsSnippet : 0,
-              range,
-              sortText:         "0_" + methodName,   // methods first
-              filterText:       methodName
-            });
-          }
-
-          // ── Fields / constants ────────────────────────────────────────────
-          for (const [fieldName, field] of Object.entries(entry.fields || {})) {
-            suggestions.push({
-              label:         { label: fieldName, detail: " " + field.type, description: entry.package },
-              kind:          CompletionItemKind.Field,
-              detail:        field.type + " " + fieldName,
-              documentation: { value: field.desc, isTrusted: true },
-              insertText:    fieldName,
-              range,
-              sortText:      "1_" + fieldName,       // fields after methods
-              filterText:    fieldName
-            });
-          }
-
-          return { suggestions, incomplete: false };
-        } catch (err) {
-          LOG("Error in provideCompletionItems:", err);
-          return null;
+    const disposables = SUPPORTED_LANGS.map(langId =>
+      monacoInstance.languages.registerCompletionItemProvider(langId, {
+        triggerCharacters: ["."],
+        provideCompletionItems(model, position) {
+          if (!enabled) return null;
+          try {
+            const api = getApiForLang(model.getLanguageId?.() || "");
+            if (!api) return null;
+            const lineText         = model.getLineContent(position.lineNumber);
+            const textBeforeCursor = lineText.substring(0, position.column - 1);
+            const dotMatch = textBeforeCursor.match(/(\w+)\s*\.\s*$/);
+            if (!dotMatch) return null;
+            const objectName = dotMatch[1];
+            LOG("Completion [" + langId + "] after:", objectName);
+            const className = resolveTypeForLang(objectName, model, position, langId, api);
+            if (!className) { LOG("Could not resolve type of:", objectName); return { suggestions: [] }; }
+            const entry = api[className];
+            if (!entry)    { return { suggestions: [] }; }
+            LOG("Completion: resolved", objectName, "→", className);
+            const partialWord = model.getWordAtPosition(position);
+            const range = partialWord
+              ? { startLineNumber: position.lineNumber, endLineNumber: position.lineNumber,
+                  startColumn: partialWord.startColumn, endColumn: partialWord.endColumn }
+              : { startLineNumber: position.lineNumber, endLineNumber: position.lineNumber,
+                  startColumn: position.column, endColumn: position.column };
+            const suggestions = [];
+            for (const [methodName, overloads] of Object.entries(entry.methods || {})) {
+              const ov = overloads[0];
+              const hasParams = (ov.params?.length ?? 0) > 0;
+              const paramStr  = (ov.params || []).map(p => p.type + " " + p.name).join(", ");
+              const retStr    = ov.returns || "void";
+              suggestions.push({
+                label: { label: methodName + "()", detail: " " + retStr, description: entry.package },
+                kind: CompletionItemKind.Method,
+                detail: retStr + " " + methodName + "(" + paramStr + ")",
+                documentation: buildCompletionDoc(methodName, overloads),
+                insertText: hasParams ? methodName + "($0)" : methodName + "()",
+                insertTextRules: hasParams ? InsertTextRule.InsertAsSnippet : 0,
+                range, sortText: "0_" + methodName, filterText: methodName
+              });
+            }
+            for (const [fieldName, field] of Object.entries(entry.fields || {})) {
+              suggestions.push({
+                label: { label: fieldName, detail: " " + field.type, description: entry.package },
+                kind: CompletionItemKind.Field,
+                detail: field.type + " " + fieldName,
+                documentation: { value: field.desc, isTrusted: true },
+                insertText: fieldName, range,
+                sortText: "1_" + fieldName, filterText: fieldName
+              });
+            }
+            return { suggestions, incomplete: false };
+          } catch (err) { LOG("Error in provideCompletionItems:", err); return null; }
         }
-      }
-    });
-
-    LOG("Completion provider registered for '" + LANG_ID + "'. Type 'ClassName.' or 'varName.' to test.");
+      })
+    );
+    completionDisposable = { dispose() { disposables.forEach(d => d.dispose()); } };
+    LOG("Completion providers registered for:", SUPPORTED_LANGS.join(", "));
   }
 
   /**
@@ -641,9 +659,59 @@
     return null;
   }
 
-  /** Escapes a string for use inside a RegExp character class or pattern. */
+  /** Escapes a string for use inside a RegExp pattern. */
   function rxEscape(s) {
     return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  /**
+   * resolveTypeForLang — dispatches to the right resolver based on language.
+   */
+  function resolveTypeForLang(objectName, model, position, langId, api) {
+    return langId === "cpp"
+      ? resolveTypeCpp(objectName, model, position, api)
+      : resolveType(objectName, model, position);
+  }
+
+  /**
+   * resolveTypeCpp — same strategy as resolveType() but handles C++ type names.
+   * C++ types are lowercase (vector, string, map) and may have
+   * const, pointer (*), and reference (&) qualifiers.
+   */
+  function resolveTypeCpp(objectName, model, position, api) {
+    if (!api) api = window.CPP_API;
+    if (!api) return null;
+
+    // 1. Direct class name match (e.g. vector, string, algorithm)
+    if (api[objectName]) return objectName;
+
+    const currentLine = position.lineNumber;
+    for (let i = currentLine; i >= 1; i--) {
+      const line = model.getLineContent(i);
+
+      // 2. Declaration: [const] TypeName[<...>][*/&] varName
+      //    e.g. "vector<int> v", "string s", "const unordered_map<int,int>& mp"
+      const declRe = new RegExp(
+        `(?:^|[\\s;{(])(?:const\\s+)?(\\w+)(?:<[^>]*>)?(?:\\s*[*&])?\\s+${rxEscape(objectName)}(?:\\s*[=;,)]|$)`,
+        "m"
+      );
+      const declMatch = line.match(declRe);
+      if (declMatch && api[declMatch[1]]) return declMatch[1];
+
+      // 3. Constructor: varName = TypeName(...) or varName(TypeName(...))
+      //    e.g. "v = vector<int>(n, 0)"
+      const ctorRe = new RegExp(`\\b${rxEscape(objectName)}\\s*=\\s*(\\w+)\\s*[<(]`);
+      const ctorMatch = line.match(ctorRe);
+      if (ctorMatch && api[ctorMatch[1]]) return ctorMatch[1];
+
+      // 4. Range-for: for (auto& x : collection) — type = auto, unresolvable;
+      //    but explicit type: for (string s : vec)
+      const forRe = new RegExp(`for\\s*\\(\\s*(?:const\\s+)?(\\w+)(?:<[^>]*>)?(?:\\s*[*&])?\\s+${rxEscape(objectName)}\\s*:`);
+      const forMatch = line.match(forRe);
+      if (forMatch && api[forMatch[1]]) return forMatch[1];
+    }
+
+    return null;
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -664,118 +732,67 @@
     if (!monacoInstance) { LOG("registerSignatureHelpProvider: monacoInstance is null — skipping."); return; }
     if (signatureDisposable) { signatureDisposable.dispose(); signatureDisposable = null; }
 
-    signatureDisposable = monacoInstance.languages.registerSignatureHelpProvider(LANG_ID, {
-      signatureHelpTriggerCharacters:   ["(", ","],
-      signatureHelpRetriggerCharacters: [","],
+    const disposables = SUPPORTED_LANGS.map(langId =>
+      monacoInstance.languages.registerSignatureHelpProvider(langId, {
+        signatureHelpTriggerCharacters:   ["(", ","],
+        signatureHelpRetriggerCharacters: [","],
 
-      provideSignatureHelp(model, position /*, token, context */) {
-        if (!enabled) return null;
-        try {
-          const sigCtx = findSignatureContext(model, position);
-          if (!sigCtx) return null;
+        provideSignatureHelp(model, position) {
+          if (!enabled) return null;
+          try {
+            const api = getApiForLang(model.getLanguageId?.() || "");
+            if (!api) return null;
+            const sigCtx = findSignatureContext(model, position);
+            if (!sigCtx) return null;
+            const { methodName, objectName, activeParam } = sigCtx;
+            LOG("SignatureHelp ["+langId+"] → method:", methodName, " object:", objectName ?? "(none)", " param:", activeParam);
 
-          const { methodName, objectName, activeParam } = sigCtx;
-          LOG("SignatureHelp → method:", methodName, "  object:", objectName ?? "(none)",
-              "  param index:", activeParam);
-
-          const api = window.JAVA_API;
-          if (!api) return null;
-
-          // Resolve which class owns the method
-          let overloads    = null;
-          let resolvedClass = null;
-
-          if (objectName) {
-            const cls = resolveType(objectName, model, position);
-            if (cls && api[cls]?.methods?.[methodName]) {
-              overloads     = api[cls].methods[methodName];
-              resolvedClass = cls;
-            }
-          }
-
-          // Fall back: search all classes (handles bare method calls like parseInt)
-          if (!overloads) {
-            for (const [cls, entry] of Object.entries(api)) {
-              if (entry.methods?.[methodName]) {
-                overloads     = entry.methods[methodName];
-                resolvedClass = cls;
-                break;
+            let overloads = null, resolvedClass = null;
+            if (objectName) {
+              const cls = resolveTypeForLang(objectName, model, position, langId, api);
+              if (cls && api[cls]?.methods?.[methodName]) {
+                overloads = api[cls].methods[methodName]; resolvedClass = cls;
               }
             }
-          }
-
-          if (!overloads) return null;
-          LOG("SignatureHelp: resolved", methodName, "→", resolvedClass);
-
-          // Build Monaco SignatureInformation for each overload
-          const signatures = overloads.map(ov => {
-            const params  = ov.params || [];
-            const retPart = ov.returns ? ov.returns + " " : "";
-
-            // Rebuild the label precisely so we can compute exact param offsets:
-            // e.g.  "boolean add(E e)"  or  "void add(int index, E element)"
-            const methodPart   = ov.signature.substring(0, ov.signature.indexOf("("));
-            const paramStrings = params.map(p => p.type + " " + p.name);
-            const innerLabel   = paramStrings.join(", ");
-            const fullLabel    = retPart + methodPart + "(" + innerLabel + ")";
-
-            // Compute character offsets for each param inside fullLabel
-            const openParenPos = (retPart + methodPart + "(").length;
-            const parameters   = [];
-            let   cursor       = openParenPos;
-            for (let pi = 0; pi < paramStrings.length; pi++) {
-              const ps = paramStrings[pi];
-              parameters.push({
-                label: [cursor, cursor + ps.length],
-                documentation: {
-                  value: "`" + params[pi].type + "` **" + params[pi].name + "** — " + params[pi].desc,
-                  isTrusted: true
-                }
-              });
-              cursor += ps.length + 2; // +2 for ", "
+            if (!overloads) {
+              for (const [cls, entry] of Object.entries(api)) {
+                if (entry.methods?.[methodName]) { overloads = entry.methods[methodName]; resolvedClass = cls; break; }
+              }
             }
+            if (!overloads) return null;
+            LOG("SignatureHelp: resolved", methodName, "→", resolvedClass);
 
-            // Build description: method desc + returns
-            let docValue = ov.desc || "";
-            if (ov.returnsDesc) docValue += "\n\n↩ *Returns:* " + ov.returnsDesc;
-            if (ov.throws?.length > 0) {
-              docValue += "\n\n";
-              for (const t of ov.throws) docValue += "⚠ *Throws:* `" + t + "`\n";
+            const signatures = overloads.map(ov => {
+              const params  = ov.params || [];
+              const retPart = ov.returns ? ov.returns + " " : "";
+              const methodPart   = ov.signature.substring(0, ov.signature.indexOf("("));
+              const paramStrings = params.map(p => p.type + " " + p.name);
+              const fullLabel    = retPart + methodPart + "(" + paramStrings.join(", ") + ")";
+              const openParenPos = (retPart + methodPart + "(").length;
+              const parameters = []; let cur = openParenPos;
+              for (let pi = 0; pi < paramStrings.length; pi++) {
+                const ps = paramStrings[pi];
+                parameters.push({ label: [cur, cur + ps.length], documentation: { value: "`"+params[pi].type+"` **"+params[pi].name+"** — "+params[pi].desc, isTrusted: true } });
+                cur += ps.length + 2;
+              }
+              let docValue = ov.desc || "";
+              if (ov.returnsDesc) docValue += "\n\n↩ *Returns:* " + ov.returnsDesc;
+              if (ov.throws?.length > 0) { docValue += "\n\n"; for (const t of ov.throws) docValue += "⚠ *Throws:* `"+t+"`\n"; }
+              return { label: fullLabel, documentation: docValue ? { value: docValue, isTrusted: true } : undefined, parameters };
+            });
+
+            let activeSignature = 0;
+            for (let si = 0; si < overloads.length; si++) {
+              if ((overloads[si].params?.length ?? 0) >= activeParam + 1) { activeSignature = si; break; }
             }
-
-            return {
-              label: fullLabel,
-              documentation: docValue ? { value: docValue, isTrusted: true } : undefined,
-              parameters
-            };
-          });
-
-          // Pick the best activeSignature: prefer the overload whose param count
-          // covers the current argument position.
-          let activeSignature = 0;
-          for (let si = 0; si < overloads.length; si++) {
-            if ((overloads[si].params?.length ?? 0) >= activeParam + 1) {
-              activeSignature = si;
-              break;
-            }
-          }
-          const clampedParam = Math.min(
-            activeParam,
-            Math.max(0, (overloads[activeSignature].params?.length ?? 1) - 1)
-          );
-
-          return {
-            value: { signatures, activeSignature, activeParameter: clampedParam },
-            dispose() {}
-          };
-        } catch (err) {
-          LOG("Error in provideSignatureHelp:", err);
-          return null;
+            const clampedParam = Math.min(activeParam, Math.max(0, (overloads[activeSignature].params?.length ?? 1) - 1));
+            return { value: { signatures, activeSignature, activeParameter: clampedParam }, dispose() {} };
+          } catch (err) { LOG("Error in provideSignatureHelp:", err); return null; }
         }
-      }
-    });
-
-    LOG("Signature help provider registered for '" + LANG_ID + "'. Type a method call to test.");
+      })
+    );
+    signatureDisposable = { dispose() { disposables.forEach(d => d.dispose()); } };
+    LOG("Signature help providers registered for:", SUPPORTED_LANGS.join(", "));
   }
 
   /**

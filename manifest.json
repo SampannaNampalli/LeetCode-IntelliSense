@@ -48,6 +48,10 @@
         "java-data/java_util.js",
         "java-data/java_io.js",
         "java-data/index.js",
+        "cpp-data/cpp_stl_a.js",
+        "cpp-data/cpp_stl_b.js",
+        "cpp-data/cpp_algorithms.js",
+        "cpp-data/index.js",
         "injected.js"
       ],
       "world": "MAIN",
