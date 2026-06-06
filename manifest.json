@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "LeetCode Java IntelliSense",
-  "version": "1.0.1",
-  "description": "Hover tooltips with Java method signatures and parameter info for LeetCode's code editor.",
+  "name": "LeetCode IntelliSense",
+  "version": "1.1.0",
+  "description": "Hover tooltips, dot-completion, and signature help for Java, C++, and Python 3 in LeetCode's code editor.",
 
   "browser_specific_settings": {
     "gecko": {
@@ -24,7 +24,7 @@
       "48":  "icons/icon48.png",
       "128": "icons/icon128.png"
     },
-    "default_title": "LeetCode Java IntelliSense"
+    "default_title": "LeetCode IntelliSense"
   },
 
   "permissions": ["storage"],
@@ -52,6 +52,9 @@
         "cpp-data/cpp_stl_b.js",
         "cpp-data/cpp_algorithms.js",
         "cpp-data/index.js",
+        "python-data/py_builtins.js",
+        "python-data/py_stdlib.js",
+        "python-data/index.js",
         "injected.js"
       ],
       "world": "MAIN",

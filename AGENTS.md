@@ -8,8 +8,7 @@ Persistent context for AI agents working on this codebase.
 ## Project Overview
 
 A **Firefox (Manifest V3) browser extension** that adds IntelliSense to
-LeetCode's Monaco-based code editor. Currently supports **Java**; C++ support
-is the active next milestone.
+LeetCode's Monaco-based code editor. Currently supports **Java, C++, and Python 3**.
 
 **Three working features (all languages):**
 1. **Hover tooltips** — hover a class/method/field name to see full docs.
@@ -31,10 +30,15 @@ LCAuto/
 │   ├── java_util.js       # window.JAVA_UTIL_DATA (ArrayList, HashMap, …)
 │   ├── java_io.js         # window.JAVA_IO_DATA   (BufferedReader, …)
 │   └── index.js           # Merges all three → window.JAVA_API
-├── cpp-data/              # PENDING — not yet created
-│   ├── cpp_stl.js         # window.CPP_STL_DATA (vector, string, map, …)
-│   ├── cpp_algorithms.js  # window.CPP_ALGO_DATA (sort, min, max, …)
+├── cpp-data/
+│   ├── cpp_stl_a.js       # window.CPP_STL_DATA_A (vector, string, deque, pair)
+│   ├── cpp_stl_b.js       # window.CPP_STL_DATA_B (map, set, stack, queue, …)
+│   ├── cpp_algorithms.js  # window.CPP_ALGO_DATA  (sort, min, max, bisect, …)
 │   └── index.js           # Merges → window.CPP_API
+├── python-data/
+│   ├── py_builtins.js     # window.PY_BUILTINS_DATA (list, dict, set, str, tuple, int)
+│   ├── py_stdlib.js       # window.PY_STDLIB_DATA  (deque, Counter, heapq, math, bisect, …)
+│   └── index.js           # Merges → window.PYTHON_API
 └── popup/
     ├── popup.html
     ├── popup.css

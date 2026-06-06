@@ -41,3 +41,17 @@ When a data file is too large for one response:
 2. Write Part B (second half) as `cpp_stl_b.js` → `window.CPP_STL_DATA_B`
 3. Merge in `index.js`: `Object.assign({}, window.CPP_STL_DATA_A, window.CPP_STL_DATA_B, ...)`
 4. Load both scripts in `manifest.json` before `index.js`
+
+**Python used the same pattern:**
+- `py_builtins.js` → `window.PY_BUILTINS_DATA` (list, dict, set, str, tuple, int)
+- `py_stdlib.js`  → `window.PY_STDLIB_DATA`  (deque, Counter, heapq, math, bisect, itertools, functools)
+- `python-data/index.js` merges → `window.PYTHON_API`
+
+---
+
+## PITFALL: `*/` inside JSDoc block comments
+
+A `*/` sequence anywhere inside a `/** … */` comment terminates the comment early,
+causing a SyntaxError on the character that follows. Always rephrase:
+- Bad:  `* C++ types may have const/*/& qualifiers.`
+- Good: `* C++ types may have const, pointer (*), and reference (&) qualifiers.`

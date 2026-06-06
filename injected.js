@@ -38,7 +38,7 @@
   const BRIDGE_SOURCE   = "lc-intellisense-bridge";
   const MONACO_EVENT    = "__lc_intellisense_monaco_ready__";
   const EDITOR_EVENT    = "__lc_intellisense_editor_created__";
-  const SUPPORTED_LANGS = ["java", "cpp", "c++"]; // register for both C++ variants LeetCode might use
+  const SUPPORTED_LANGS = ["java", "cpp", "c++", "python", "python3"]; // all supported languages
   const POLL_INTERVAL   = 200;   // ms
   const POLL_MAX        = 90_000; // ms
   const LOG = (...a) => console.log("[LC IntelliSense]", ...a);
@@ -50,7 +50,15 @@
     // Accept any C++-ish language ID: "cpp", "c++", "c_cpp", "cplusplus", etc.
     if (langId === "cpp" || langId.includes("c++") || langId.includes("cpp"))
       return window.CPP_API || null;
+    // Accept "python" and "python3" (LeetCode may use either).
+    if (langId === "python" || langId.includes("python"))
+      return window.PYTHON_API || null;
     return null;
+  }
+
+  /** Returns true if langId is any Python variant. */
+  function isPythonLang(langId) {
+    return langId === "python" || langId === "python3" || (langId && langId.includes("python"));
   }
 
   // ─── State ──────────────────────────────────────────────────────────────────
@@ -273,8 +281,17 @@
             // when Monaco calls multiple providers.
             const api = getApiForLang(modelLang);
             if (!api) return null;
-            if (langId === "java" && modelLang !== "java") return null;
-            if (langId !== "java" && modelLang === "java") return null;
+            // Guard: each provider only fires for its own language family.
+            const modelIsJava   = modelLang === "java";
+            const modelIsCpp    = modelLang === "cpp" || modelLang === "c++";
+            const modelIsPython = isPythonLang(modelLang);
+            const providerIsJava   = langId === "java";
+            const providerIsCpp    = langId === "cpp" || langId === "c++";
+            const providerIsPython = isPythonLang(langId);
+            if (providerIsJava   && !modelIsJava)   return null;
+            if (providerIsCpp    && !modelIsCpp)    return null;
+            if (providerIsPython && !modelIsPython) return null;
+            if (!providerIsJava && !providerIsCpp && !providerIsPython) return null;
             const wordInfo = model.getWordAtPosition(position);
             if (!wordInfo) return null;
             const token    = wordInfo.word;
@@ -304,12 +321,9 @@
     console.log("hoverDisposable:",       hoverDisposable ? "✅ registered" : "❌ not registered");
     console.log("completionDisposable:",  completionDisposable ? "✅ registered" : "❌ not registered");
     console.log("signatureDisposable:",   signatureDisposable ? "✅ registered" : "❌ not registered");
-    console.log("JAVA_API:", window.JAVA_API
-      ? "✅ loaded (" + Object.keys(window.JAVA_API).length + " classes)"
-      : "❌ missing");
-    console.log("CPP_API:",  window.CPP_API
-      ? "✅ loaded (" + Object.keys(window.CPP_API).length + " classes)"
-      : "❌ missing");
+    console.log("JAVA_API:",   window.JAVA_API   ? "✅ loaded (" + Object.keys(window.JAVA_API).length   + " classes)" : "❌ missing");
+    console.log("CPP_API:",    window.CPP_API    ? "✅ loaded (" + Object.keys(window.CPP_API).length    + " classes)" : "❌ missing");
+    console.log("PYTHON_API:", window.PYTHON_API ? "✅ loaded (" + Object.keys(window.PYTHON_API).length + " classes)" : "❌ missing");
     console.log("window.monaco:",    window.monaco ? "✅ present" : "❌ absent");
     console.log("window.require:",   typeof window.require === "function" ? "✅ present" : "❌ absent");
     console.log("Monaco ready?",     m ? (isMonacoReady(m) ? "✅ yes" : "⚠ present but no editors yet") : "❌ no");
@@ -387,7 +401,9 @@
     if (!api) { LOG("API not loaded."); return null; }
 
     // Determine syntax highlight language for code blocks.
-    const langHint = api === window.JAVA_API ? "java" : "cpp";
+    const langHint = api === window.JAVA_API ? "java"
+                   : api === window.PYTHON_API ? "python"
+                   : "cpp";
 
     // 1. Direct class / interface / enum match
     if (api[token]) {
@@ -531,7 +547,19 @@
         provideCompletionItems(model, position) {
           if (!enabled) return null;
           try {
-            const api = getApiForLang(model.getLanguageId?.() || "");
+            const modelLang = model.getLanguageId?.() || "";
+            // Guard: each provider only handles its own language family.
+            const modelIsJava   = modelLang === "java";
+            const modelIsCpp    = modelLang === "cpp" || modelLang === "c++";
+            const modelIsPython = isPythonLang(modelLang);
+            const providerIsJava   = langId === "java";
+            const providerIsCpp    = langId === "cpp" || langId === "c++";
+            const providerIsPython = isPythonLang(langId);
+            if (providerIsJava   && !modelIsJava)   return null;
+            if (providerIsCpp    && !modelIsCpp)    return null;
+            if (providerIsPython && !modelIsPython) return null;
+            if (!providerIsJava && !providerIsCpp && !providerIsPython) return null;
+            const api = getApiForLang(modelLang);
             if (!api) return null;
             const lineText         = model.getLineContent(position.lineNumber);
             const textBeforeCursor = lineText.substring(0, position.column - 1);
@@ -668,9 +696,56 @@
    * resolveTypeForLang — dispatches to the right resolver based on language.
    */
   function resolveTypeForLang(objectName, model, position, langId, api) {
-    return langId === "cpp"
-      ? resolveTypeCpp(objectName, model, position, api)
-      : resolveType(objectName, model, position);
+    if (langId === "cpp" || langId === "c++") return resolveTypeCpp(objectName, model, position, api);
+    if (isPythonLang(langId))                 return resolveTypePython(objectName, model, position, api);
+    return resolveType(objectName, model, position);
+  }
+
+  /**
+   * resolveTypePython — infers the Python type of objectName by scanning upward.
+   *
+   * Resolution order:
+   *   1. Direct API key match  (list, dict, deque, Counter, math, heapq…)
+   *   2. Literal initializer   (x = [] → list, x = {} → dict, x = set() → set)
+   *   3. Type annotation       (x: list or x: list[int])
+   *   4. Constructor call      (x = deque(), x = Counter(nums), x = defaultdict(int))
+   */
+  function resolveTypePython(objectName, model, position, api) {
+    if (!api) api = window.PYTHON_API;
+    if (!api) return null;
+
+    // 1. Direct API key (e.g. the user typed "list." or "math.")
+    if (api[objectName]) return objectName;
+
+    const currentLine = position.lineNumber;
+    for (let i = currentLine; i >= 1; i--) {
+      const line = model.getLineContent(i);
+
+      // 2. Type annotation: varName: TypeName or varName: TypeName[...]
+      const annotRe = new RegExp(`\\b${rxEscape(objectName)}\\s*:\\s*(\\w+)`);
+      const annotMatch = line.match(annotRe);
+      if (annotMatch && api[annotMatch[1]]) return annotMatch[1];
+
+      // 3. Literal initializer
+      //    x = []  → list
+      //    x = {}  → dict (Note: {} could be dict or set — prefer dict as it's more common)
+      //    x = ()  → tuple
+      const litRe = new RegExp(`\\b${rxEscape(objectName)}\\s*=\\s*([\\[\\{\\(])`);
+      const litMatch = line.match(litRe);
+      if (litMatch) {
+        const brace = litMatch[1];
+        if (brace === "[" && api["list"])  return "list";
+        if (brace === "{" && api["dict"])  return "dict";
+        if (brace === "(" && api["tuple"]) return "tuple";
+      }
+
+      // 4. Constructor call: x = TypeName(...) or x = TypeName[...](...)
+      const ctorRe = new RegExp(`\\b${rxEscape(objectName)}\\s*=\\s*(\\w+)\\s*[\\[(]`);
+      const ctorMatch = line.match(ctorRe);
+      if (ctorMatch && api[ctorMatch[1]]) return ctorMatch[1];
+    }
+
+    return null;
   }
 
   /**
