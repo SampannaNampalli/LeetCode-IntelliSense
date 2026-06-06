@@ -1,21 +1,25 @@
 /**
  * popup.js
- * Manages the on/off toggle and persists state via browser.storage.sync.
+ * Manages the on/off toggle and persists state via storage.sync.
+ * Cross-browser: works in both Firefox (browser.*) and Chrome (chrome.*).
  */
+
+// Unified extension API
+const _ext = (typeof browser !== "undefined") ? browser : chrome;
 
 const toggle      = document.getElementById("toggle");
 const toggleLabel = document.getElementById("toggle-label");
 const toggleDesc  = document.getElementById("toggle-desc");
 
 // ─── Load persisted state ─────────────────────────────────────────────────
-browser.storage.sync.get({ enabled: true }).then(({ enabled }) => {
+_ext.storage.sync.get({ enabled: true }).then(({ enabled }) => {
   applyState(enabled, false);
 });
 
 // ─── Toggle handler ───────────────────────────────────────────────────────
 toggle.addEventListener("change", () => {
   const enabled = toggle.checked;
-  browser.storage.sync.set({ enabled });
+  _ext.storage.sync.set({ enabled });
   applyState(enabled, true);
 });
 

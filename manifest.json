@@ -4,12 +4,6 @@
   "version": "1.1.0",
   "description": "Hover tooltips, dot-completion, and signature help for Java, C++, and Python 3 in LeetCode's code editor.",
 
-  "browser_specific_settings": {
-    "gecko": {
-      "id": "lc-java-intellisense@extension",
-      "strict_min_version": "128.0"
-    }
-  },
 
   "icons": {
     "16":  "icons/icon16.png",

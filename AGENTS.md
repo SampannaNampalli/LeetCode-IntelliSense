@@ -7,8 +7,16 @@ Persistent context for AI agents working on this codebase.
 
 ## Project Overview
 
-A **Firefox (Manifest V3) browser extension** that adds IntelliSense to
-LeetCode's Monaco-based code editor. Currently supports **Java, C++, and Python 3**.
+A **Manifest V3 browser extension** that adds IntelliSense to LeetCode's
+Monaco-based code editor. Supports **Firefox 128+** and **Chrome 111+**.
+Currently provides IntelliSense for **Java, C++, and Python 3**.
+
+**Cross-browser compatibility:**
+- `browser.*` API (Firefox) vs `chrome.*` (Chrome) — handled by a one-line shim
+  in `bridge.js` and `popup/popup.js`:
+  `const _ext = (typeof browser !== "undefined") ? browser : chrome;`
+- `world: "MAIN"` content scripts — supported in Chrome 111+ and Firefox 128+.
+- `browser_specific_settings` removed from manifest (was Firefox-only).
 
 **Three working features (all languages):**
 1. **Hover tooltips** — hover a class/method/field name to see full docs.
