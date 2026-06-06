@@ -34,11 +34,24 @@
 (function () {
   "use strict";
 
+  // ── Cross-reload cleanup ───────────────────────────────────────────────────
+  // Monaco providers are page-level globals. If the extension reloads without
+  // a tab refresh, the IIFE re-runs but the OLD providers are still registered
+  // in Monaco. Call any cleanup left by the previous run before doing anything.
+  if (typeof window.__lcji_cleanup === "function") {
+    try { window.__lcji_cleanup(); } catch (_) {}
+  }
+  window.__lcji_cleanup = null; // will be set again after registration
+
   // ─── Constants ─────────────────────────────────────────────────────────────
   const BRIDGE_SOURCE   = "lc-intellisense-bridge";
   const MONACO_EVENT    = "__lc_intellisense_monaco_ready__";
   const EDITOR_EVENT    = "__lc_intellisense_editor_created__";
-  const SUPPORTED_LANGS = ["java", "cpp", "c++", "python", "python3"]; // all supported languages
+  // Only register for the exact Monaco language IDs LeetCode actually uses
+  // (confirmed via window.__lcji_debug()). Registering for extra IDs such as
+  // "c++" or "python" causes Monaco to treat them as wildcards, firing those
+  // providers for every model and producing duplicate hover/completion results.
+  const SUPPORTED_LANGS = ["java", "cpp", "python3"];
   const POLL_INTERVAL   = 200;   // ms
   const POLL_MAX        = 90_000; // ms
   const LOG = (...a) => console.log("[LC IntelliSense]", ...a);
@@ -310,6 +323,21 @@
     );
     hoverDisposable = { dispose() { disposables.forEach(d => d.dispose()); } };
     LOG("Hover providers registered for:", SUPPORTED_LANGS.join(", "));
+    exposeCleanup();
+  }
+
+  /** Keeps window.__lcji_cleanup up-to-date so the next extension reload can
+   *  dispose our providers before registering its own. */
+  function exposeCleanup() {
+    window.__lcji_cleanup = function () {
+      try { hoverDisposable?.dispose();      } catch (_) {}
+      try { completionDisposable?.dispose(); } catch (_) {}
+      try { signatureDisposable?.dispose();  } catch (_) {}
+      hoverDisposable = null;
+      completionDisposable = null;
+      signatureDisposable = null;
+      monacoInstance = null;
+    };
   }
 
   // ─── Diagnostic helper ─────────────────────────────────────────────────────
