@@ -1,117 +1,186 @@
-# LeetCode Java IntelliSense
+# LeetCode IntelliSense
 
-A **Firefox browser extension** that adds Java hover-tooltip IntelliSense to LeetCode's Monaco-based code editor — similar to what you'd get in VS Code or IntelliJ.
+> Hover tooltips, dot-completion, and signature help for **Java**, **C++**, and **Python 3** — directly inside LeetCode's Monaco editor.
+
+Works on **Chrome**, **Firefox**, **Brave**, and any Chromium-based browser.
+
+---
 
 ## Features
 
-- 🔷 **Class tooltips** — hover a class name (`HashMap`, `ArrayList`, `StringBuilder`…) to see its package, description, constructors, fields, and a method preview
-- 🔍 **Method / field tooltips** — hover a method name (`charAt`, `parseInt`, `put`…) to see all overloads with full signatures, parameter docs, return-value docs, and throws docs
-- 🎯 **Context narrowing** — if multiple classes share a method name, the extension prefers the one mentioned on the same line
-- 🔘 **Toggle** — enable/disable via the toolbar popup without reloading the page
+### 🔍 Hover Tooltips
+Hover over any class name, method, or field to see full documentation inline.
 
-## Demo
+- **Class hover** — package, description, constructors, fields, and method preview
+- **Method hover** — all overloads with signatures, parameter docs, return type, and thrown exceptions
+- **Context narrowing** — when multiple classes share a method name, the extension prefers the one referenced on the same line
 
-Hover over `ArrayList` in the Java editor:
+### ⚡ Dot-triggered Completion
+Type `.` after a variable or module name to get a filtered method/field list.
 
-```
-🔷 `ArrayList`
-*java.util*
+- Resolves the variable's type from its declaration or type annotation
+- Supports literal initializers: `x = []` → `list` methods, `x = {}` → `dict` methods
+- Works with constructor calls: `x = deque()`, `x = Counter(nums)`, `x = vector<int>()`
+
+### 🔔 Signature Help
+Cursor inside `(` or after `,` shows parameter hints with types and descriptions for the current argument position.
+
+### 🔘 Enable / Disable Toggle
+Click the toolbar icon to instantly enable or disable IntelliSense without reloading the page.
 
 ---
-A resizable array implementation of the List interface…
 
-**Constructors**
+## Language Coverage
 
-​```java
-ArrayList()
-​```
-Constructs an empty list with an initial capacity of ten.
-
-**Methods** *(hover a method name for details)*
-
-`add()`  ·  `get()`  ·  `size()`  ·  `remove()`  ·  `contains()`  ·  `set()`
-```
-
-Hover over `charAt`:
-
-```
-🔷 `String.charAt` — *java.lang*
-
-​```java
-char charAt(int index)
-​```
-Returns the char value at the specified index.
-
-- `int` **index** — The index of the char value.
-
-↩ *Returns:* The char value at the specified index.
-⚠ *Throws:* `IndexOutOfBoundsException — if index is negative or not less than length()`
-```
-
-## Covered Java Classes
-
+### Java
 | Package | Classes |
 |---|---|
 | `java.lang` | `String`, `StringBuilder`, `Integer`, `Long`, `Double`, `Character`, `Boolean`, `Math`, `Object`, `System` |
 | `java.util` | `ArrayList`, `LinkedList`, `HashMap`, `LinkedHashMap`, `TreeMap`, `HashSet`, `LinkedHashSet`, `TreeSet`, `ArrayDeque`, `PriorityQueue`, `Stack`, `Collections`, `Arrays`, `Scanner`, `Random`, `Optional` |
 | `java.io` | `BufferedReader`, `InputStreamReader`, `PrintWriter`, `StringReader` |
 
+### C++ STL
+| Header | Containers / Types |
+|---|---|
+| `<vector>` | `vector` |
+| `<string>` | `string` |
+| `<deque>` | `deque` |
+| `<utility>` | `pair` |
+| `<map>` | `map`, `unordered_map` |
+| `<set>` | `set`, `unordered_set` |
+| `<stack>` | `stack` |
+| `<queue>` | `queue`, `priority_queue` |
+| `<list>` | `list` |
+| `<algorithm>` | `sort`, `reverse`, `find`, `count`, `min`, `max`, `lower_bound`, `upper_bound`, `binary_search`, `accumulate`, `fill`, `swap`, `next_permutation`, `unique`, `rotate`, `nth_element`, `min_element`, `max_element` |
+| `<cstdlib>` / `<cmath>` | `to_string`, `stoi`, `stol`, `stoll`, `abs`, `sqrt`, `pow`, `log` |
+
+### Python 3
+| Module | Types / Functions |
+|---|---|
+| `builtins` | `list`, `dict`, `set`, `str`, `tuple`, `int` |
+| `collections` | `deque`, `Counter`, `defaultdict` |
+| `heapq` | `heappush`, `heappop`, `heapify`, `heapreplace`, `heappushpop`, `nlargest`, `nsmallest` |
+| `math` | `sqrt`, `pow`, `log`, `log2`, `log10`, `ceil`, `floor`, `factorial`, `gcd`, `lcm`, `comb`, `perm`, `inf`, `pi`, `e` |
+| `bisect` | `bisect_left`, `bisect_right`, `insort_left`, `insort_right` |
+| `itertools` | `combinations`, `permutations`, `product`, `chain`, `accumulate`, `groupby`, `zip_longest` |
+| `functools` | `reduce`, `lru_cache`, `cache`, `cmp_to_key`, `partial` |
+
+---
+
 ## Installation
 
-This is a **Firefox-only** extension (uses the `browser.*` API). Chrome is not supported.
+### Chrome / Brave (and all Chromium browsers)
 
-### Load as a temporary add-on (development)
+1. Open `chrome://extensions` (or `brave://extensions`)
+2. Enable **Developer mode** (top-right toggle)
+3. Click **Load unpacked** → select the project folder (`LCAuto/`)
+4. Navigate to a [LeetCode problem](https://leetcode.com/problems/two-sum/), pick any language, and hover!
 
-1. Open Firefox and navigate to `about:debugging`
-2. Click **This Firefox** in the left sidebar
-3. Click **Load Temporary Add-on…**
-4. Navigate to the project folder and select `manifest.json`
-5. Go to any [LeetCode problem](https://leetcode.com/problems/two-sum/), select **Java**, and hover!
+### Firefox
 
-> **Note:** Temporary add-ons are removed when Firefox restarts. For persistent installation, the extension would need to be signed by Mozilla.
+1. Open `about:debugging` → **This Firefox**
+2. Click **Load Temporary Add-on…**
+3. Select `manifest.json` inside the project folder
 
-### Permanent installation (self-signed)
+> **Note:** Temporary add-ons are removed on Firefox restart. For persistent installation, build and sign with [web-ext](https://extensionworkshop.com/documentation/develop/getting-started-with-web-ext/):
+> ```sh
+> npm install -g web-ext
+> web-ext build
+> ```
+> Then install the generated `.zip` via `about:addons` → gear → **Install Add-on From File**.
 
-1. Install [web-ext](https://extensionworkshop.com/documentation/develop/getting-started-with-web-ext/): `npm install -g web-ext`
-2. In the project directory: `web-ext build`
-3. In Firefox: `about:addons` → gear icon → **Install Add-on From File** → select the generated `.zip`
-
-> Firefox requires add-ons to be signed unless you use [Firefox Developer Edition or Nightly](https://extensionworkshop.com/documentation/publish/signing-and-distribution-overview/) with `xpinstall.signatures.required` set to `false` in `about:config`.
+---
 
 ## Diagnostics
 
-Open DevTools (F12) on a LeetCode problem and run:
+Open DevTools (`F12`) on any LeetCode problem and run:
 
 ```js
-window.__lcji_debug()        // full diagnostic report
-window.__lcji_forceActivate() // force re-activate if hover isn't working
+window.__lcji_debug()         // Full diagnostic report
+window.__lcji_forceActivate() // Force re-activation if providers aren't working
 ```
 
-Expected healthy output:
+**Healthy output (Python 3 problem):**
 ```
 enabled: true
 monacoInstance: ✅ found
 hoverDisposable: ✅ registered
-JAVA_API: ✅ loaded (33 classes)
+completionDisposable: ✅ registered
+signatureDisposable: ✅ registered
+JAVA_API:   ✅ loaded (33 classes)
+CPP_API:    ✅ loaded (14 classes)
+PYTHON_API: ✅ loaded (14 classes)
 window.monaco: ✅ present
 Monaco ready? ✅ yes
+Models: 2  python3, plaintext
+  Editor 0 language: python3
+  Editor 1 language: plaintext
 ```
 
-## Adding New Java Classes
+---
 
-1. Open the appropriate file in `java-data/` (`java_lang.js`, `java_util.js`, `java_io.js`) or create a new one
-2. Follow the existing `ClassEntry` schema:
+## Project Structure
+
+```
+LCAuto/
+├── manifest.json          # MV3 manifest — Chrome, Firefox, Brave
+├── early_hook.js          # MAIN world, document_start — forces Monaco options
+├── bridge.js              # ISOLATED world — relays toggle state via postMessage
+├── injected.js            # MAIN world, document_idle — hover, completion, signature providers
+├── java-data/
+│   ├── java_lang.js       # java.lang (String, Math, Integer…)
+│   ├── java_util.js       # java.util (ArrayList, HashMap…)
+│   ├── java_io.js         # java.io (BufferedReader…)
+│   └── index.js           # → window.JAVA_API
+├── cpp-data/
+│   ├── cpp_stl_a.js       # vector, string, deque, pair
+│   ├── cpp_stl_b.js       # map, set, stack, queue, priority_queue, list…
+│   ├── cpp_algorithms.js  # sort, min, max, lower_bound…
+│   └── index.js           # → window.CPP_API
+├── python-data/
+│   ├── py_builtins.js     # list, dict, set, str, tuple, int
+│   ├── py_stdlib.js       # deque, Counter, heapq, math, bisect, itertools, functools
+│   └── index.js           # → window.PYTHON_API
+├── popup/
+│   ├── popup.html
+│   ├── popup.css
+│   └── popup.js
+└── icons/
+    ├── icon16.png
+    ├── icon48.png
+    └── icon128.png
+```
+
+---
+
+## How It Works
+
+LeetCode's code editor is built on [Monaco Editor](https://microsoft.github.io/monaco-editor/). Monaco provides `languages.registerHoverProvider()`, `registerCompletionItemProvider()`, and `registerSignatureHelpProvider()` for exactly this use case.
+
+The tricky part: **LeetCode explicitly disables** Monaco's native hover, suggestion, and parameter-hints widgets to use its own UI overlays. This extension works around that with three layers:
+
+1. **`early_hook.js`** runs at `document_start` in the MAIN world. It intercepts `window.monaco` assignment and patches `monaco.editor.create()` to force `{ hover: {enabled:true}, quickSuggestions: true, parameterHints: {enabled:true}, … }` into the editor options — synchronously, before LeetCode can apply its defaults.
+
+2. **`injected.js`** registers three providers (hover, completion, signature help) for each supported language (`java`, `cpp`, `python3`). A `window.__lcji_cleanup` function is stored on the page so that if the extension reloads without a tab refresh, old providers are disposed before new ones are registered.
+
+3. A **200 ms poller + MutationObserver** handles edge cases: extension loaded after Monaco was already set, SPA navigation between problems, and language switches.
+
+---
+
+## Adding New API Data
+
+All three languages share the same data schema:
 
 ```js
 "ClassName": {
-  package: "java.util",
-  kind: "class",           // "class" | "interface" | "enum"
+  package: "java.util",            // or "std (<vector>)", "builtins", "heapq", etc.
+  kind: "class",                   // "class" | "interface" | "enum"
   description: "...",
   constructors: [
     { signature: "ClassName()", desc: "..." }
   ],
   fields: {
-    "FIELD_NAME": { type: "int", desc: "..." }
+    "FIELD": { type: "int", desc: "..." }
   },
   methods: {
     "methodName": [
@@ -128,46 +197,15 @@ Monaco ready? ✅ yes
 }
 ```
 
-3. If adding a **new file**: export as `window.JAVA_XXXXXX_DATA = { ... }`, add a `<script>` entry in `manifest.json` before `index.js`, and merge it in `java-data/index.js`
+For free functions (C++ algorithms, Python `heapq`/`math`), use a pseudo-class key (e.g. `"algorithm"`, `"heapq"`) and put the functions as methods — the signature-help provider searches all classes automatically.
 
-## Project Structure
-
-```
-LCAuto/
-├── manifest.json          # MV3 extension manifest (Firefox only)
-├── early_hook.js          # MAIN world, document_start — intercepts window.monaco
-├── bridge.js              # ISOLATED world — relays storage toggle to injected.js
-├── injected.js            # MAIN world, document_idle — registers hover provider
-├── java-data/
-│   ├── java_lang.js       # java.lang classes (String, Integer, Math…)
-│   ├── java_util.js       # java.util classes (ArrayList, HashMap…)
-│   ├── java_io.js         # java.io classes (BufferedReader…)
-│   └── index.js           # Merges all → window.JAVA_API
-├── popup/
-│   ├── popup.html
-│   ├── popup.css
-│   └── popup.js
-└── icons/
-    ├── icon16.png
-    ├── icon48.png
-    └── icon128.png
-```
-
-## How It Works
-
-LeetCode's code editor is built on [Monaco Editor](https://microsoft.github.io/monaco-editor/). Monaco exposes a `languages.registerHoverProvider()` API that extensions can use to provide custom hover content.
-
-The tricky part: LeetCode assigns `window.monaco` early but creates the actual editor widget asynchronously during its React render cycle — and explicitly disables Monaco's native hover widget (it uses its own custom IntelliSense panel instead).
-
-This extension works around that with three layers:
-
-1. **`early_hook.js`** (runs at `document_start`, MAIN world) intercepts `window.monaco` assignment via `Object.defineProperty`, then patches `monaco.editor.create()` to force `hover: { enabled: true }` into the editor's options before Monaco constructs it — synchronously, so LeetCode cannot override it afterwards
-2. **`injected.js`** listens for both the `window.monaco` assignment event and the `monaco.editor.create()` hook event to register the hover provider at the right moment
-3. A **200 ms poller + MutationObserver** handles edge cases (SPA navigation, extension loaded mid-session)
+---
 
 ## Permissions
 
-Only `"storage"` is requested — solely to persist the enabled/disabled toggle across browser restarts. No host permissions, no tabs access, no network access.
+Only `"storage"` — to persist the enable/disable toggle across sessions. No network access, no tab access, no host permissions beyond `https://leetcode.com/*`.
+
+---
 
 ## License
 
