@@ -26,6 +26,12 @@
   "permissions": [
     "storage"
   ],
+
+  "data_collection_permissions": {
+    "required": [],
+    "optional": []
+  },
+
   "content_scripts": [
     {
       "matches": [
