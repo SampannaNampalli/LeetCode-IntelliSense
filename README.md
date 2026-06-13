@@ -71,10 +71,11 @@ Click the toolbar icon to instantly enable or disable IntelliSense without reloa
 
 ### Chrome / Brave (and all Chromium browsers)
 
-1. Open `chrome://extensions` (or `brave://extensions`)
-2. Enable **Developer mode** (top-right toggle)
-3. Click **Load unpacked** → select the project folder (`LCAuto/`)
-4. Navigate to a [LeetCode problem](https://leetcode.com/problems/two-sum/), pick any language, and hover!
+1. Download a zip of this repository and unzip it
+2. Open `chrome://extensions` (or `brave://extensions`)
+3. Enable **Developer mode** (top-right toggle)
+4. Click **Load unpacked** → select the de-compressed project folder (`LeetCode-IntelliSense-main/`)
+5. Navigate to a [LeetCode problem](https://leetcode.com/problems/two-sum/), pick any language, and hover!
 
 ### Firefox
 
@@ -82,9 +83,10 @@ Click the toolbar icon to instantly enable or disable IntelliSense without reloa
 1. Download from the firefox add-on store: https://addons.mozilla.org/en-US/firefox/addon/intellisense-for-leetcode/
 
 #### Method 2:
-1. Open `about:debugging` → **This Firefox**
-2. Click **Load Temporary Add-on…**
-3. Select `manifest.json` inside the project folder
+1. Download a zip of this repository and unzip it
+2. Open `about:debugging` → **This Firefox**
+3. Click **Load Temporary Add-on…**
+4. Select `manifest.json` inside the decompressed project folder
 
 > **Note:** Temporary add-ons are removed on Firefox restart. For persistent installation, build and sign with [web-ext](https://extensionworkshop.com/documentation/develop/getting-started-with-web-ext/):
 > ```sh
