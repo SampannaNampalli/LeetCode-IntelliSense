@@ -78,10 +78,10 @@ Click the toolbar icon to instantly enable or disable IntelliSense without reloa
 
 ### Firefox
 
-# Method 1:
+#### Method 1:
 1. Download from the firefox add-on store: https://addons.mozilla.org/en-US/firefox/addon/intellisense-for-leetcode/
 
-# Method 2:
+#### Method 2:
 1. Open `about:debugging` → **This Firefox**
 2. Click **Load Temporary Add-on…**
 3. Select `manifest.json` inside the project folder
